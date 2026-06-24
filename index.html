@@ -1016,6 +1016,8 @@ function switchKhoi(khoi){
     if(badge) badge.textContent=(DATA.length||21)+' Cán bộ';
     document.getElementById('main-tabs').style.display='';
     if(document.getElementById('main-tabs-kbb')) document.getElementById('main-tabs-kbb').style.display='none';
+    // Reset ACTIVE_CB để đảm bảo tất cả CB KBL hiển thị đúng
+    qlInit();
     // Reset style.display trước để gTab có thể hiện đúng panel
     document.querySelectorAll('.tab-panel').forEach(function(p){ p.style.display='none'; });
     gTab('tq', document.querySelector('#main-tabs .tab'));
@@ -1882,11 +1884,26 @@ async function loadDataFromGAS(){
     var d=await r.json();
     if(!d.data||!d.data.length) throw new Error('empty');
 
-    DATA=filterExclude(d.data); ACTIVE_CB=null;
-    if(d.date){ IMP.date=d.date; saveDate(d.date); }
-    refreshDateDisplay(); // Cập nhật ngay sau khi set
+    var gasData = filterExclude(d.data);
 
-    // src-badge
+    // Kiểm tra: dữ liệu GAS phải có đủ CB từ tất cả 5 phòng KBL
+    var hasAllPhong = PHONGS.every(function(p){
+      return gasData.some(function(r){ return r.phong === p; });
+    });
+    if(!hasAllPhong){
+      // GAS data thiếu phòng → dùng SEED, chỉ lấy ngày
+      if(d.date){ IMP.date=d.date; saveDate(d.date); refreshDateDisplay(); }
+      if(badge){ badge.className='data-badge badge-import'; }
+      console.warn('[loadDataFromGAS] Thiếu phòng, bỏ qua data GAS');
+      throw new Error('empty');
+    }
+
+    // Data đầy đủ → áp dụng
+    DATA = gasData;
+    qlInit();
+    if(d.date){ IMP.date=d.date; saveDate(d.date); }
+    refreshDateDisplay();
+
     if(badge){ badge.className='data-badge badge-import'; }
 
     bieuRendered=false;
@@ -1899,12 +1916,9 @@ async function loadDataFromGAS(){
 
     var ts=d.savedAt?new Date(d.savedAt).toLocaleDateString('vi-VN'):'';
     setSaveStatus('✅ Tải từ GAS thành công'+(ts?' ('+ts+')':''),'var(--green)');
-    // Re-render toàn bộ dashboard với data mới
     bieuRendered=false;
     renderTQ(); renderLD(); renderCB(); renderKV(); renderSS();
     refreshDateDisplay();
-    // Đảm bảo tab TQ vẫn active sau khi async load xong
-    // (chỉ nếu user chưa navigate sang tab khác)
     if(currentTabId === 'tq' || !currentTabId) {
       document.querySelectorAll('.tab-panel').forEach(function(p){ p.style.display='none'; });
       var p = document.getElementById('tab-tq');
@@ -3106,13 +3120,12 @@ function getActive(){
 }
 
 function qlInit(){
-  if(!ACTIVE_CB) ACTIVE_CB = {};
+  // LUÔN reset hoàn toàn theo DATA hiện tại
+  // Chỉ bỏ off CB không có data thực tế
+  var _off = ['157359'];
+  ACTIVE_CB = {};
   DATA.forEach(function(r){
-    if(!(r.ma in ACTIVE_CB)){
-      // Mặc định bỏ tích: 157359, TP KHCN, 4 GĐ PGD
-      var _off = ['157359', '157271', '157253', '157257', '150432', '28268']; // 157260 đã bị loại khỏi DATA
-      ACTIVE_CB[r.ma] = _off.indexOf(r.ma) === -1;
-    }
+    ACTIVE_CB[r.ma] = _off.indexOf(r.ma) === -1;
   });
 }
 
@@ -3242,18 +3255,21 @@ function qlLoadSaved(){
     var s = localStorage.getItem('bidv_active_cb');
     if(!s) return;
     var parsed = JSON.parse(s);
-    if(parsed.length !== DATA.length){ localStorage.removeItem('bidv_active_cb'); return; }
-    qlInit(); // set default off trước
-    var _off = ['157359','157271','157253','157257','150432','28268'];
+    // Nếu số CB thay đổi → xóa cache, qlInit() đã được gọi trước
+    if(parsed.length !== DATA.length){
+      localStorage.removeItem('bidv_active_cb');
+      return; // qlInit() đã reset đúng rồi
+    }
+    // Restore state từ localStorage: override state mặc định
+    var _off = ['157359'];
     parsed.forEach(function(item){
-      // _off list: LUÔN bỏ tích, không cho localStorage override
       if(_off.indexOf(item.ma) !== -1){
-        ACTIVE_CB[item.ma] = false;
-      } else {
-        ACTIVE_CB[item.ma] = item.on;
+        ACTIVE_CB[item.ma] = false; // luôn off
+      } else if(item.ma in ACTIVE_CB){
+        ACTIVE_CB[item.ma] = !!item.on; // restore user choice
       }
     });
-    console.log('QL: loaded, active='+getActive().length);
+    console.log('QL: restored, active='+getActive().length);
   }catch(e){ console.warn('qlLoadSaved err:',e); }
 }
 
