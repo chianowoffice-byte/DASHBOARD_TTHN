@@ -2459,10 +2459,35 @@ async function syncGoogleSheets() {
       }
     } catch(be){ bscStatus = ' (BSC lỗi: '+be.message+')'; }
 
+    // Sync BSC KBB
+    var bscKBBStatus = '';
+    try{
+      if(gasUrl){
+        setProgress(95, 'Đang đồng bộ BSC KBB...');
+        var bscKBBR = await fetch(gasUrl + '?action=bsc-kbb');
+        if(bscKBBR.ok){
+          var bscKBBD = await bscKBBR.json();
+          if(bscKBBD.ok && bscKBBD.bsc){
+            Object.assign(BSC_KBB_DATA, bscKBBD.bsc);
+            bscKBBStatus = ' + BSC KBB ✅';
+            logs.push('✅ BSC KBB: '+(bscKBBD.bsc.khoi?bscKBBD.bsc.khoi.length:0)+' CT Khối');
+          } else {
+            bscKBBStatus = ' (BSC KBB: '+(bscKBBD.error||'lỗi')+')';
+          }
+        }
+      }
+    } catch(be){ bscKBBStatus = ' (BSC KBB lỗi: '+be.message+')'; }
+
     setProgress(100, 'Hoàn tất!');
-    status.textContent = '✅ Đã tải ' + Object.keys(IMP.raw).length + '/3 file' + bscStatus;
+    status.textContent = '✅ Đã tải ' + Object.keys(IMP.raw).length + '/3 file' + bscStatus + bscKBBStatus;
     status.style.color = 'var(--green)';
     refreshDateDisplay();
+
+    // Auto push lên GitHub sau khi sync xong
+    setProgress(100, '⏳ Đang push lên GitHub...');
+    try{
+      await autoDeployToGitHub();
+    } catch(de){ console.warn('[sync] auto-deploy err:', de.message); }
 
     // Auto-advance to step 2 after 800ms
     setTimeout(function(){ iStep(2); }, 800);
@@ -2554,6 +2579,64 @@ function loadGHConfig(){
     if(f){ var el=document.getElementById('gh-file');  if(el) el.value=f; }
     if(t && r) document.getElementById('gh-config-status').textContent = '✅ Cấu hình đã lưu sẵn';
   }catch(e){}
+}
+
+// Đồng bộ → fetch file GitHub → inject SEED+BSC → push
+async function autoDeployToGitHub(){
+  var prog = document.getElementById('pdf-prog');
+  var show = function(msg){ if(prog){ prog.classList.add('show'); prog.textContent=msg; } };
+  var hide = function(){ setTimeout(function(){ if(prog){ prog.textContent=''; prog.classList.remove('show'); } },6000); };
+  try{
+    show('⏳ Đang lấy file từ GitHub...');
+    var token = localStorage.getItem('bidv_gh_token') || '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';
+    var repo  = localStorage.getItem('bidv_gh_repo')  || 'chianowoffice-byte/DASHBOARD_KBL';
+    var apiUrl= 'https://api.github.com/repos/'+repo+'/contents/index.html';
+    var hdrs  = { 'Authorization':'token '+token, 'Accept':'application/vnd.github.v3+json' };
+
+    var getR  = await fetch(apiUrl, {headers:hdrs});
+    if(!getR.ok) throw new Error('Lấy file GitHub lỗi: '+getR.status);
+    var fileInfo = await getR.json();
+    var sha  = fileInfo.sha;
+    var html = decodeURIComponent(escape(atob(fileInfo.content.replace(/\n/g,''))));
+    console.log('[deploy] Got file from GitHub, size:', html.length);
+
+    show('⏳ Đang cập nhật SEED...');
+    var newSeed = 'const SEED = '+JSON.stringify(DATA)+';';
+    html = html.replace(/const SEED = \[[\s\S]*?\];/, newSeed);
+
+    // Inject BSC KBL
+    if(BSC_DATA && BSC_DATA.khoi && BSC_DATA.khoi.length>0){
+      var MKS = '/'+  '*%%BSC_START%%*' + '/';
+      var MKE = '/'+  '*%%BSC_END%%*'   + '/';
+      var bscJson = JSON.stringify(BSC_DATA).replace(/<\/script>/gi,'<\\/script>');
+      var bscNew  = MKS+'\nvar BSC_DATA = '+bscJson+';\n'+MKE;
+      var p1 = html.lastIndexOf(MKS);
+      var p2 = html.lastIndexOf(MKE);
+      if(p1>0 && p2>p1){
+        html = html.substring(0,p1)+bscNew+html.substring(p2+MKE.length);
+        console.log('[deploy] BSC KBL injected at pos', p1);
+      }
+    }
+
+    show('⏳ Đang push lên GitHub...');
+    var result = await pushToGitHub(html);
+    if(result.ok){
+      show('✅ ' + result.msg);
+      hide();
+    } else {
+      throw new Error(result.msg);
+    }
+  } catch(e){
+    show('⚠️ Lỗi: '+e.message);
+    hide();
+    console.error('[autoDeployToGitHub]', e);
+  }
+}
+
+async function deployNow(){
+  var prog = document.getElementById('pdf-prog');
+  if(prog){ prog.classList.add('show'); prog.textContent='⏳ Chuẩn bị...'; }
+  await autoDeployToGitHub();
 }
 
 async function pushToGitHub(htmlContent){
