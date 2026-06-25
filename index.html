@@ -2931,98 +2931,214 @@ function renderTQ_KBB(){
 function renderCB_KBB(){
   var panel = document.getElementById('tab-cb-kbb');
   if(!panel) return;
-  var data = getActiveKBB();
-  var PHONGS = ['P. KHDN1','P. KHDN2','PGD Hào Nam','PGD Nam Cao','PGD West Lake','PGD Lương Định Của'];
-  // KPI
-  var tot = {tnt:0,hdv:0,dn:0,dvr:0};
-  data.forEach(function(r){ tot.tnt+=r.tnt||0; tot.hdv+=r.hdv_ck||0; tot.dn+=r.dntd_ck||0; tot.dvr+=r.dvr||0; });
-  var h = '<div style="padding:10px">';
-  h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">';
-  [{l:'TNT',v:tot.tnt.toFixed(1),s:'tỷ',c:'#1565C0'},{l:'HĐV CK',v:tot.hdv.toFixed(0),s:'tỷ',c:'#2E7D32'},
-   {l:'DNTD CK',v:tot.dn.toFixed(0),s:'tỷ',c:'#E65100'},{l:'Thu DVR',v:tot.dvr.toFixed(2),s:'tỷ',c:'#6A1B9A'}
-  ].forEach(function(k){
-    h += '<div style="background:#fff;border:1px solid #e8e8e8;border-radius:8px;padding:8px;text-align:center;border-top:3px solid '+k.c+'">';
-    h += '<div style="font-size:10px;color:#666;margin-bottom:2px">'+k.l+'</div>';
-    h += '<div style="font-size:18px;font-weight:900;color:'+k.c+'">'+k.v+'</div>';
-    h += '<div style="font-size:10px;color:#999">'+k.s+'</div></div>';
+
+  // ── Header với toggle Tổng hợp / Chi tiết ─────────────────
+  var mode = panel._mode || 'tonghop';
+  var html = '<div style="padding:10px">';
+
+  // Toggle buttons
+    // Toggle: dùng DOM API tránh quote lồng nhau
+  var wrap = document.createElement('div');
+  wrap.style.cssText = 'display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap';
+  var lbl = document.createElement('span');
+  lbl.style.cssText = 'font-size:12px;font-weight:700;color:#333';
+  lbl.textContent = 'Hiển thị:';
+  wrap.appendChild(lbl);
+  [['tonghop','📊 Tổng hợp (4 CT)'],['chitiet','🔍 Chi tiết (15 CT)']].forEach(function(pair){
+    var btn = document.createElement('button');
+    var active = (mode===pair[0]);
+    btn.style.cssText = 'font-size:11px;font-weight:700;padding:4px 14px;border-radius:12px;cursor:pointer;border:2px solid '+(active?'#1565C0':'#ccc')+';background:'+(active?'#1565C0':'#fff')+';color:'+(active?'#fff':'#555');
+    btn.textContent = pair[1];
+    btn.dataset.m = pair[0];
+    btn.addEventListener('click', function(){ setCBKBBMode(this.dataset.m); });
+    wrap.appendChild(btn);
   });
-  h += '</div>';
-  // Bảng CB theo phòng
-  h += '<div style="overflow-x:auto">';
-  h += '<table style="width:100%;font-size:11px;border-collapse:collapse">';
-  h += '<thead><tr style="background:#1B3D6F;color:#fff">';
-  h += '<th style="padding:6px 8px;text-align:left">#</th>';
-  h += '<th style="padding:6px 8px;text-align:left">Cán bộ</th>';
-  h += '<th style="padding:6px 8px;text-align:left">Chức vụ</th>';
-  h += '<th style="padding:6px 8px;text-align:right">TNT (tỷ)</th>';
-  h += '<th style="padding:6px 8px;text-align:right">HĐV CK (tỷ)</th>';
-  h += '<th style="padding:6px 8px;text-align:right">DNTD CK (tỷ)</th>';
-  h += '<th style="padding:6px 8px;text-align:right">TDH CK (tỷ)</th>';
-  h += '<th style="padding:6px 8px;text-align:right">DVR (tỷ)</th>';
-  h += '</tr></thead><tbody>';
-  var idx = 0;
-  PHONGS.forEach(function(phong){
+  var container = document.createElement('div');
+  container.style.padding = '10px';
+  container.appendChild(wrap);
+  var tblDiv = document.createElement('div');
+  tblDiv.id = 'kbb-cb-table';
+  container.appendChild(tblDiv);
+  panel.innerHTML = '';
+  panel.appendChild(container);
+
+  // Gắn event sau khi HTML đã được render
+  var btnTH = document.getElementById('kbb-btn-tonghop');
+  var btnCT = document.getElementById('kbb-btn-chitiet');
+  if(btnTH) btnTH.addEventListener('click', function(){ setCBKBBMode('tonghop'); });
+  if(btnCT) btnCT.addEventListener('click', function(){ setCBKBBMode('chitiet'); });
+
+  _renderCBKBBTable(mode);
+}
+
+function setCBKBBMode(mode){
+  var panel = document.getElementById('tab-cb-kbb');
+  if(!panel) return;
+  panel._mode = mode;
+  renderCB_KBB();
+}
+
+function _renderCBKBBTable(mode){
+  var tbl = document.getElementById('kbb-cb-table');
+  if(!tbl) return;
+  var data = getActiveKBB();
+
+  var COLS_TONGHOP = [
+    {key:'hdv_ck',   lbl:'HĐV CK',       don:'tỷ'},
+    {key:'dntd_ck',  lbl:'DNTD CK',      don:'tỷ'},
+    {key:'tnt',      lbl:'TNT',           don:'tỷ'},
+    {key:'dvr',      lbl:'Thu DVR',       don:'tỷ'},
+  ];
+  var COLS_CHITIET = [
+    {key:'hdv_ck',   lbl:'HĐV CK',       don:'tỷ', g:'HĐV'},
+    {key:'hdv_bq',   lbl:'HĐV BQ',       don:'tỷ', g:'HĐV'},
+    {key:'hdv_kkh',  lbl:'HĐV KKH BQ',   don:'tỷ', g:'HĐV'},
+    {key:'dntd_ck',  lbl:'DNTD CK',      don:'tỷ', g:'Dư nợ'},
+    {key:'dntd_tdh', lbl:'DNTD TDH CK',  don:'tỷ', g:'Dư nợ'},
+    {key:'dntd_bq',  lbl:'DNTD BQ',      don:'tỷ', g:'Dư nợ'},
+    {key:'dntd_qh',  lbl:'DNTD Quá hạn', don:'tỷ', g:'Dư nợ'},
+    {key:'dntd_xau', lbl:'DNTD Xấu',     don:'tỷ', g:'Dư nợ'},
+    {key:'tnt',      lbl:'TNT',           don:'tỷ', g:'TNT'},
+    {key:'dvr',      lbl:'Thu DVR',       don:'tỷ', g:'Thu DV'},
+    {key:'kdnt',     lbl:'Thu KDNT',      don:'tỷ', g:'Thu DV'},
+    {key:'bl',       lbl:'Thu BL',        don:'tỷ', g:'Thu DV'},
+  ];
+  var COLS = mode==='tonghop' ? COLS_TONGHOP : COLS_CHITIET;
+
+  // ── Hàm phân loại LD ──────────────────────────────────────
+  var LD_KW = ['Trưởng phòng','PTP','Phó Trưởng phòng','Giám đốc PGD','Phó Giám đốc PGD'];
+  function isLD(r){ return LD_KW.some(function(kw){ return r.cv && r.cv.indexOf(kw)!==-1; }); }
+
+  // ── Tính BQ nhóm gộp cả KHDN1+KHDN2 ──────────────────────
+  // Chỉ tính cho 2 phòng KHDN
+  var khdn = data.filter(function(r){ return r.phong==='P. KHDN1'||r.phong==='P. KHDN2'; });
+  var grpLD = khdn.filter(isLD);
+  var grpCB = khdn.filter(function(r){ return !isLD(r); });
+
+  function avg(arr, key){
+    if(!arr.length) return 0;
+    return arr.reduce(function(s,r){ return s+(r[key]||0); },0) / arr.length;
+  }
+
+  // Build map: key → {ld: avg, cb: avg}
+  var AVG = {};
+  COLS.forEach(function(c){
+    AVG[c.key] = {
+      ld: avg(grpLD, c.key),
+      cb: avg(grpCB, c.key)
+    };
+  });
+
+  // ── Build table ────────────────────────────────────────────
+  var PHONGS_KBB = ['P. KHDN1','P. KHDN2','PGD Hào Nam','PGD Nam Cao','PGD West Lake','PGD Lương Định Của'];
+  var GRP_COLORS = {HĐV:'#1565C0','Dư nợ':'#2E7D32',TNT:'#E65100','Thu DV':'#6A1B9A'};
+
+  var h = '<div style="overflow-x:auto">';
+  h += '<table style="width:100%;font-size:11px;border-collapse:collapse;min-width:620px">';
+
+  // ── Header ─────────────────────────────────────────────────
+  if(mode==='chitiet'){
+    // Hàng 1: nhóm cột
+    var nhoms=[]; COLS.forEach(function(c){ var l=nhoms[nhoms.length-1]; if(l&&l.g===c.g)l.span++;else nhoms.push({g:c.g,span:1}); });
+    h += '<thead><tr style="background:#0D2B6B;color:#fff">';
+    h += '<th rowspan="2" style="padding:5px 8px;text-align:left;min-width:115px">Cán bộ</th>';
+    h += '<th rowspan="2" style="padding:5px 6px;text-align:center;font-size:10px">Nhóm</th>';
+    nhoms.forEach(function(n){
+      h += '<th colspan="'+(n.span*2)+'" style="padding:5px 6px;text-align:center;background:'+(GRP_COLORS[n.g]||'#1B3D6F')+';border-left:2px solid rgba(255,255,255,.25)">'+n.g+'</th>';
+    });
+    h += '</tr><tr style="background:#1B3D6F;color:#fff">';
+    COLS.forEach(function(c){
+      h += '<th style="padding:4px 5px;text-align:right;font-size:10px;white-space:nowrap">'+c.lbl+'</th>';
+      h += '<th style="padding:4px 4px;text-align:center;font-size:9px;opacity:.75">vs BQ</th>';
+    });
+    h += '</tr>';
+  } else {
+    h += '<thead><tr style="background:#1B3D6F;color:#fff">';
+    h += '<th style="padding:6px 8px;text-align:left;min-width:115px">Cán bộ</th>';
+    h += '<th style="padding:6px 6px;text-align:center;font-size:10px">Nhóm</th>';
+    COLS.forEach(function(c){
+      h += '<th style="padding:6px 7px;text-align:right">'+c.lbl+'</th>';
+      h += '<th style="padding:6px 4px;text-align:center;font-size:10px;opacity:.8">vs BQ</th>';
+    });
+    h += '</tr>';
+  }
+
+  // ── Dòng BQ nhóm LD (KHDN1+2) ────────────────────────────
+  function avgRow(label, tag, tagBg, avgMap, keyFn){
+    var r = '<tr style="background:#FFFDE7">';
+    r += '<td style="padding:4px 8px;font-size:10px;font-style:italic;font-weight:700;color:#555">'+label+'</td>';
+    r += '<td style="padding:4px 6px;text-align:center"><span style="font-size:9px;background:'+tagBg+';color:#fff;border-radius:3px;padding:1px 5px">'+tag+'</span></td>';
+    COLS.forEach(function(c){
+      var v = avgMap[c.key] ? avgMap[c.key][keyFn] : 0;
+      r += '<td style="padding:4px 6px;text-align:right;font-weight:700;color:#E65100;font-size:11px">'+fmtV(v,c.don)+'</td>';
+      r += '<td style="padding:4px 4px;text-align:center;font-size:10px;color:#bbb">BQ</td>';
+    });
+    r += '</tr>';
+    return r;
+  }
+
+  h += '</thead><tbody>';
+
+  var PHONGS_KBB_ALL = ['P. KHDN1','P. KHDN2','PGD Hào Nam','PGD Nam Cao','PGD West Lake','PGD Lương Định Của'];
+  var rowIdx = 0;
+
+  PHONGS_KBB_ALL.forEach(function(phong){
     var cbs = data.filter(function(r){ return r.phong===phong; });
     if(!cbs.length) return;
+
+    var isKHDN = phong==='P. KHDN1'||phong==='P. KHDN2';
+    var totalCols = 2 + COLS.length*2;
+
     // Header phòng
-    h += '<tr style="background:#EEF2FF"><td colspan="8" style="padding:5px 10px;font-weight:700;font-size:11px;color:#1565C0">📌 '+phong+' ('+cbs.length+' CB)</td></tr>';
-    var ptnt=0,phdv=0,pdn=0,pdvr=0;
-    cbs.sort(function(a,b){ return (b.tnt||0)-(a.tnt||0); }).forEach(function(r,i){
-      idx++;
-      var rowBg = i%2===0?'#fff':'#F9FAFA';
-      var isLD = r.cv && (r.cv.indexOf('Trưởng phòng')!==-1||r.cv.indexOf('PTP')!==-1||r.cv.indexOf('Giám đốc')!==-1||r.cv.indexOf('Phó Giám đốc')!==-1);
-      if(isLD) rowBg='#EBF8F7';
+    h += '<tr><td colspan="'+totalCols+'" style="background:#EEF2FF;padding:5px 10px;font-weight:800;font-size:11px;color:#1565C0;border-top:2px solid #1565C0">';
+    h += '📌 '+phong+' ('+cbs.length+' CB)';
+    if(isKHDN) h += ' <span style="font-size:10px;font-weight:400;opacity:.65">— so sánh vs BQ LD/CB gộp KHDN1+2</span>';
+    h += '</td></tr>';
+
+    // Dòng BQ nhóm (chỉ KHDN)
+    if(isKHDN){
+      h += avgRow('📊 BQ Lãnh đạo (KHDN1+2)', 'LD', '#1B3D6F', AVG, 'ld');
+      h += avgRow('📊 BQ Cán bộ (KHDN1+2)',   'CB', '#546E7A', AVG, 'cb');
+    }
+
+    // Sort: LD trước → TNT desc
+    var sorted = cbs.slice().sort(function(a,b){
+      var al=isLD(a)?1:0, bl=isLD(b)?1:0;
+      if(al!==bl) return bl-al;
+      return (b.tnt||0)-(a.tnt||0);
+    });
+
+    sorted.forEach(function(r, i){
+      rowIdx++;
+      var ld    = isLD(r);
+      var rowBg = ld ? '#EBF8F7' : (i%2===0?'#fff':'#F9FAFA');
+      var tag   = ld
+        ? '<span style="font-size:9px;background:#1B3D6F;color:#fff;border-radius:3px;padding:1px 4px">LD</span>'
+        : '<span style="font-size:9px;background:#78909C;color:#fff;border-radius:3px;padding:1px 4px">CB</span>';
+
       h += '<tr style="background:'+rowBg+'">';
-      h += '<td style="padding:5px 8px;color:#888">'+idx+'</td>';
-      h += '<td style="padding:5px 8px;font-weight:'+(isLD?'700':'600')+'">';
-      if(isLD) h += '<span style="font-size:9px;background:#1B3D6F;color:#fff;border-radius:3px;padding:1px 4px;margin-right:4px">LD</span>';
-      h += r.ten+'</td>';
-      h += '<td style="padding:5px 8px;color:#666;font-size:10px">'+r.cv+'</td>';
-      h += '<td style="padding:5px 8px;text-align:right;font-weight:700;color:#1565C0">'+(r.tnt?r.tnt.toFixed(2):'—')+'</td>';
-      h += '<td style="padding:5px 8px;text-align:right">'+(r.hdv_ck?r.hdv_ck.toFixed(0):'—')+'</td>';
-      h += '<td style="padding:5px 8px;text-align:right">'+(r.dntd_ck?r.dntd_ck.toFixed(0):'—')+'</td>';
-      h += '<td style="padding:5px 8px;text-align:right">'+(r.dntd_tdh?r.dntd_tdh.toFixed(0):'—')+'</td>';
-      h += '<td style="padding:5px 8px;text-align:right">'+(r.dvr?r.dvr.toFixed(3):'—')+'</td>';
+      h += '<td style="padding:5px 8px;font-weight:'+(ld?'700':'600')+'">'+tag+' '+r.ten+'</td>';
+      h += '<td style="padding:5px 6px;font-size:10px;color:#888;text-align:center">'+(isKHDN?r.phong.replace('P. ',''):'PGD')+'</td>';
+
+      COLS.forEach(function(c){
+        var val = r[c.key]||0;
+        // vs BQ: dùng BQ nhóm tương ứng (chỉ KHDN)
+        var bqVal = isKHDN ? (ld ? AVG[c.key].ld : AVG[c.key].cb) : null;
+        var diff  = (bqVal!==null && bqVal>0) ? (val/bqVal-1)*100 : null;
+        var dStr  = diff!==null ? (diff>=0?'▲':'▼')+Math.abs(diff).toFixed(0)+'%' : '—';
+        var dC    = diff===null?'#aaa':diff>=0?'#1B5E20':'#B71C1C';
+        var dBg   = diff===null?'transparent':diff>=0?'rgba(200,230,201,.35)':'rgba(255,205,210,.35)';
+        h += '<td style="padding:5px 6px;text-align:right;font-weight:700">'+fmtV(val,c.don)+'</td>';
+        h += '<td style="padding:5px 4px;text-align:center;font-size:10px;font-weight:700;color:'+dC+';background:'+dBg+'">'+dStr+'</td>';
+      });
       h += '</tr>';
-      ptnt+=r.tnt||0; phdv+=r.hdv_ck||0; pdn+=r.dntd_ck||0; pdvr+=r.dvr||0;
     });
-    // Tổng phòng
-    h += '<tr style="background:#EEF2FF;font-weight:700">';
-    h += '<td colspan="3" style="padding:4px 10px;font-size:10px;text-align:right;font-style:italic">Tổng '+phong+'</td>';
-    h += '<td style="padding:4px 8px;text-align:right;color:#1565C0">'+ptnt.toFixed(2)+'</td>';
-    h += '<td style="padding:4px 8px;text-align:right">'+phdv.toFixed(0)+'</td>';
-    h += '<td style="padding:4px 8px;text-align:right">'+pdn.toFixed(0)+'</td>';
-    h += '<td style="padding:4px 8px;text-align:right">—</td>';
-    h += '<td style="padding:4px 8px;text-align:right">'+pdvr.toFixed(3)+'</td></tr>';
   });
-  h += '</tbody></table></div></div>';
-  panel.innerHTML = h;
+
+  h += '</tbody></table></div>';
+  tbl.innerHTML = h;
 }
 
-function renderQL_KBB(){
-  var panel = document.getElementById('tab-ql-kbb');
-  if(!panel) return;
-  var PHONGS = ['P. KHDN1','P. KHDN2','PGD Hào Nam','PGD Nam Cao','PGD West Lake','PGD Lương Định Của'];
-  var h = '<div style="padding:12px"><div style="font-size:13px;font-weight:700;color:var(--teal-d);margin-bottom:10px">⚙️ Quản lý hiển thị Cán bộ KBB</div>';
-  PHONGS.forEach(function(phong){
-    var cbs = SEED_KBB.filter(function(r){ return r.phong===phong; });
-    if(!cbs.length) return;
-    h += '<div style="margin-bottom:12px">';
-    h += '<div style="font-size:11px;font-weight:700;color:var(--teal-d);padding:4px 8px;background:var(--teal-l,#e8f5f0);border-radius:4px;margin-bottom:6px">'+phong+'</div>';
-    cbs.forEach(function(r){
-      var checked = ACTIVE_CB_KBB[r.ma] !== false;
-      h += '<label style="display:flex;align-items:center;gap:8px;padding:4px 8px;cursor:pointer;font-size:12px">';
-      h += '<input type="checkbox" data-ma="'+r.ma+'" '+(checked?'checked':'')+' onchange="qlTickKBB(this)">';
-      h += '<span><b>'+r.ten+'</b> <span style="color:#888;font-size:11px">'+r.cv+'</span></span>';
-      h += '</label>';
-    });
-    h += '</div>';
-  });
-  h += '</div>';
-  panel.innerHTML = h;
-}
-
-// ── KBB Render Lãnh Đạo ──────────────────────────────────────
 function renderLD_KBB(){
   var panel = document.getElementById('tab-ld-kbb');
   if(!panel) return;
